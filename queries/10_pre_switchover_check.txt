@@ -1,0 +1,72 @@
+whenever sqlerror continue
+set lines 200 pages 500 trimspool on feedback off verify off
+col dbu new_value dbu noprint
+col fecha new_value fecha noprint
+select lower(db_unique_name) dbu, to_char(sysdate,'YYYYMMDD_HH24MI') fecha from v$database;
+spool pre_sw_&dbu._&fecha..txt
+
+prompt === BASE E INSTANCIA ===
+col host_name for a35
+select name, db_unique_name, database_role, open_mode, protection_mode, flashback_on, cdb from v$database;
+select instance_name, host_name, version_full, status, startup_time from v$instance;
+
+prompt === PARAMETROS ===
+col name for a30
+col value for a100
+select name, value from v$parameter
+ where name in ('service_names','dg_broker_start','log_archive_config','fal_server',
+                'db_recovery_file_dest','db_recovery_file_dest_size','standby_file_management');
+
+prompt === PDBS ===
+col name for a30
+select con_id, name, open_mode, restricted from v$pdbs order by con_id;
+col con_name for a30
+col instance_name for a20
+select con_name, instance_name, state from cdb_pdb_saved_states;
+
+prompt === SERVICIOS ACTIVOS (lo que hay que reproducir tras el switchover) ===
+col name for a45
+col network_name for a60
+select con_id, name, network_name from v$active_services
+ where name not like 'SYS$%' order by con_id, name;
+
+prompt === SERVICIOS DEFINIDOS (diccionario) ===
+col pdb for a20
+select con_id, name, network_name, pdb from cdb_services
+ where name not like 'SYS$%' order by con_id, name;
+
+prompt === TRIGGERS DE ARRANQUE / CAMBIO DE ROL ===
+col owner for a15
+col trigger_name for a35
+col triggering_event for a40
+select con_id, owner, trigger_name, triggering_event, status from cdb_triggers
+ where triggering_event like '%STARTUP%' or triggering_event like '%ROLE_CHANGE%'
+ order by con_id;
+
+prompt === JOBS QUE ARRANCAN SERVICIOS ===
+col job_name for a35
+select con_id, owner, job_name, enabled from cdb_scheduler_jobs
+ where upper(job_action) like '%START_SERVICE%';
+
+prompt === DATA GUARD: LAG ===
+col value for a20
+col time_computed for a22
+select name, value, time_computed from v$dataguard_stats
+ where name in ('transport lag','apply lag','apply finish time');
+
+prompt === DATA GUARD: PROCESOS Y GAP ===
+select process, status, thread#, sequence# from v$managed_standby
+ where process like 'MRP%' or process like 'RFS%' or process like 'LNS%' or process like 'ARCH%';
+select * from v$archive_gap;
+
+prompt === STANDBY REDO LOGS ===
+select thread#, count(*) srls, max(bytes)/1024/1024 mb from v$standby_log group by thread#;
+
+prompt === FRA Y RESTORE POINTS ===
+col name for a30
+select name, space_limit/1024/1024/1024 limit_gb, space_used/1024/1024/1024 used_gb,
+       space_reclaimable/1024/1024/1024 reclaim_gb from v$recovery_file_dest;
+select name, guarantee_flashback_database, time from v$restore_point;
+
+spool off
+prompt Fichero generado: pre_sw_&dbu._&fecha..txt
