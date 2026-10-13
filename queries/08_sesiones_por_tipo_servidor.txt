@@ -1,0 +1,2 @@
+-- Tipo de servidor de las sesiones actuales (DEDICATED / SHARED / POOLED).
+SELECT server, COUNT(*) FROM v$session GROUP BY server;

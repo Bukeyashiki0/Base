@@ -1,0 +1,6 @@
+-- PGA real por proceso hoy. Para estimar: avg_alloc_mb x nº procesos objetivo + SGA, y comparar con la RAM.
+-- En RAC usar gv$process (añadir inst_id).
+SELECT COUNT(*) procesos,
+       ROUND(AVG(pga_used_mem)/1024/1024,1) avg_used_mb,
+       ROUND(AVG(pga_alloc_mem)/1024/1024,1) avg_alloc_mb
+FROM v$process;

@@ -1,0 +1,3 @@
+-- ¿pga_aggregate_limit fijado a mano? (isdefault = FALSE)
+-- Si isdefault = TRUE, Oracle usa el mayor de: 2 GB, 2 x pga_aggregate_target, 3 MB x processes.
+SELECT name, value, isdefault FROM v$parameter WHERE name = 'pga_aggregate_limit';

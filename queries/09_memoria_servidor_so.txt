@@ -1,0 +1,3 @@
+# En el servidor (SO): RAM total/libre y configuración de HugePages.
+free -g
+grep -i huge /proc/meminfo

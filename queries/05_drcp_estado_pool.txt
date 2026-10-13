@@ -1,0 +1,4 @@
+-- ¿Está el pool DRCP arrancado y con qué tamaño? Si status = INACTIVE, no se usa.
+-- La aplicación debe conectar con (SERVER=POOLED) o :POOLED en EZConnect.
+SELECT connection_pool, status, minsize, maxsize, num_cbrok, maxconn_cbrok
+FROM dba_cpool_info;

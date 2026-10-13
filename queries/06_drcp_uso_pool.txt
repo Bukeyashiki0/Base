@@ -1,0 +1,3 @@
+-- Uso real del pool DRCP (sin filas = no se usa).
+SELECT num_open_servers, num_busy_servers, num_requests, num_waits, num_hits
+FROM v$cpool_stats;

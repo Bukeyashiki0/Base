@@ -1,0 +1,5 @@
+-- Conexiones de cliente DRCP por usuario/programa (sin filas = no se usa).
+SELECT username, program, COUNT(*)
+FROM v$cpool_conn_info
+GROUP BY username, program
+ORDER BY 3 DESC;
