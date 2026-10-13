@@ -1,0 +1,53 @@
+-- ==================== sessions/resource_limit_processes_sessions.sql ====================
+-- Uso actual y pico real (max_utilization) de processes y sessions desde el arranque.
+-- En RAC usar gv$resource_limit (añadir inst_id).
+SELECT resource_name, current_utilization, max_utilization, limit_value
+FROM   v$resource_limit
+WHERE  resource_name IN ('processes', 'sessions');
+
+-- ==================== sessions/sessions_by_user_program.sql ====================
+-- Reparto de sesiones de usuario por username/program (total y activas).
+-- En RAC usar gv$session (añadir inst_id).
+SELECT username, program, COUNT(*) total,
+       SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END) activas
+FROM   v$session
+WHERE  type = 'USER'
+GROUP  BY username, program
+ORDER  BY 3 DESC;
+
+-- ==================== memory/pga_por_proceso.sql ====================
+-- PGA real por proceso hoy. Para estimar: avg_alloc_mb x nº procesos objetivo + SGA, y comparar con la RAM.
+-- En RAC usar gv$process (añadir inst_id).
+SELECT COUNT(*) procesos,
+       ROUND(AVG(pga_used_mem)/1024/1024,1) avg_used_mb,
+       ROUND(AVG(pga_alloc_mem)/1024/1024,1) avg_alloc_mb
+FROM v$process;
+
+-- ¿pga_aggregate_limit fijado a mano? (isdefault = FALSE)
+SELECT name, value, isdefault FROM v$parameter WHERE name = 'pga_aggregate_limit';
+
+-- En el servidor (SO):
+--   free -g
+--   grep -i huge /proc/meminfo
+
+-- ==================== drcp/drcp_estado_y_uso.sql ====================
+-- Comprobar si se usa DRCP. Si status = INACTIVE o v$cpool_conn_info está vacía, no lo usan.
+-- La aplicación debe conectar con (SERVER=POOLED) o :POOLED en EZConnect.
+
+-- ¿Está el pool arrancado y con qué tamaño?
+SELECT connection_pool, status, minsize, maxsize, num_cbrok, maxconn_cbrok
+FROM dba_cpool_info;
+
+-- Uso real del pool
+SELECT num_open_servers, num_busy_servers, num_requests, num_waits, num_hits
+FROM v$cpool_stats;
+
+-- Conexiones de cliente por programa/usuario
+SELECT username, program, COUNT(*)
+FROM v$cpool_conn_info
+GROUP BY username, program
+ORDER BY 3 DESC;
+
+-- Tipo de servidor de las sesiones actuales (DEDICATED / SHARED / POOLED)
+SELECT server, COUNT(*) FROM v$session GROUP BY server;
+
