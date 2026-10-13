@@ -9,4 +9,4 @@ processes                     1485             1970         4257
 sessions                      1502             2001         6416
 
 Como veis, el máximo que habéis llegado a usar desde el arranque de la base de datos es de 1.970 procesos y 2.001 sesiones, menos de la mitad del límite. Si tuvierais 20.000 conexiones simultáneas, estaríais recibiendo errores de conexión.
-Entendemos que las 20.000 corresponden al máximo configurado en vuestros pools, no a las conexiones reales. Si necesitáis ampliar, indicadnos cuántas conexiones usáis realmente en los picos de carga.
+Entendemos que las 20.000 corresponden al máximo configurado en vuestros pools, no a las conexiones reales. Sin una correlación entre lo que configuráis en los pods y lo que realmente vemos en base de datos, no puedo garantizaros que subirlo así no os vaya a dar problemas.
