@@ -1,0 +1,12 @@
+Buenas,
+He estado revisando y no vemos que os estéis conectando con 20.000 sesiones a la base de datos de ninguna forma.
+Una conexión a base de datos es una sesión, y cada sesión es un proceso. Tenéis configurada en base de datos capacidad para 4.257 procesos.
+El límite de sesiones es algo mayor (6.416) porque incluye margen para las sesiones internas de Oracle, no para conexiones adicionales de la aplicación.
+
+RESOURCE_NAME  CURRENT_UTILIZATION  MAX_UTILIZATION  LIMIT_VALUE
+-------------  -------------------  ---------------  -----------
+processes                     1485             1970         4257
+sessions                      1502             2001         6416
+
+Como veis, el máximo que habéis llegado a usar desde el arranque de la base de datos es de 1.970 procesos y 2.001 sesiones, menos de la mitad del límite. Si tuvierais 20.000 conexiones simultáneas, estaríais recibiendo errores de conexión.
+Entendemos que las 20.000 corresponden al máximo configurado en vuestros pools, no a las conexiones reales. Si necesitáis ampliar, indicadnos cuántas conexiones usáis realmente en los picos de carga.
