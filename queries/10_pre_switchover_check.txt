@@ -1,10 +1,5 @@
 whenever sqlerror continue
-set lines 200 pages 500 trimspool on feedback off verify off
-col dbu new_value dbu noprint
-col fecha new_value fecha noprint
-select lower(db_unique_name) dbu, to_char(sysdate,'YYYYMMDD_HH24MI') fecha from v$database;
-spool pre_sw_&dbu._&fecha..txt
-
+set lines 200 pages 500 feedback off verify off
 prompt === BASE E INSTANCIA ===
 col host_name for a35
 select name, db_unique_name, database_role, open_mode, protection_mode, flashback_on, cdb from v$database;
@@ -42,6 +37,11 @@ col triggering_event for a40
 select con_id, owner, trigger_name, triggering_event, status from cdb_triggers
  where triggering_event like '%STARTUP%' or triggering_event like '%ROLE_CHANGE%'
  order by con_id;
+col text for a120
+select t.trigger_name, s.line, s.text from dba_triggers t join dba_source s
+  on s.owner = t.owner and s.name = t.trigger_name and s.type = 'TRIGGER'
+ where t.triggering_event like '%STARTUP%' or t.triggering_event like '%ROLE_CHANGE%'
+ order by t.trigger_name, s.line;
 
 prompt === JOBS QUE ARRANCAN SERVICIOS ===
 col job_name for a35
@@ -59,7 +59,8 @@ select process, status, thread#, sequence# from v$managed_standby
  where process like 'MRP%' or process like 'RFS%' or process like 'LNS%' or process like 'ARCH%';
 select * from v$archive_gap;
 
-prompt === STANDBY REDO LOGS ===
+prompt === REDO LOGS ONLINE Y STANDBY ===
+select thread#, count(*) orls, max(bytes)/1024/1024 mb from v$log group by thread#;
 select thread#, count(*) srls, max(bytes)/1024/1024 mb from v$standby_log group by thread#;
 
 prompt === FRA Y RESTORE POINTS ===
@@ -67,6 +68,3 @@ col name for a30
 select name, space_limit/1024/1024/1024 limit_gb, space_used/1024/1024/1024 used_gb,
        space_reclaimable/1024/1024/1024 reclaim_gb from v$recovery_file_dest;
 select name, guarantee_flashback_database, time from v$restore_point;
-
-spool off
-prompt Fichero generado: pre_sw_&dbu._&fecha..txt
