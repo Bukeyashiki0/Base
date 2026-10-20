@@ -71,13 +71,19 @@ du -sh /u02/app/oracle/product/19.0.0.0/dbhome_3
 
 El espacio libre en `/u02` debe ser holgadamente mayor que el tamaño del home. Comprimido ocupa menos, pero es mejor tener margen.
 
-### 0.4 Crear el directorio de copias
+### 0.4 Ubicación de las copias
+
+Todas las copias `.tar.gz` se dejan directamente en `/u02/app/oracle/product/19.0.0.0`. Ese directorio ya existe, así que no hay que crear nada: solo comprobarlo.
 
 En nodo1 y en nodo2:
 
 ```bash
-mkdir -p /u02/backup_vulnerabilidades
+ls -ld /u02/app/oracle/product/19.0.0.0
 ```
+
+Está en el mismo filesystem `/u02` que revisaste en el 0.3, así que el espacio ya está validado.
+
+> ⚠ Los `.tar.gz` quedan junto a `dbhome_2`, que es el home **en uso**. Al borrar cosas en este directorio, revisa bien cada comando: nunca se toca `dbhome_2`.
 
 ---
 
@@ -86,21 +92,21 @@ mkdir -p /u02/backup_vulnerabilidades
 ### 1.1 Copia en nodo1
 
 ```bash
-cd /u02/app/oracle/product/19.0.0.0 && tar -czpf /u02/backup_vulnerabilidades/dbhome_3_$(hostname -s).tar.gz dbhome_3
+cd /u02/app/oracle/product/19.0.0.0 && tar -czpf /u02/app/oracle/product/19.0.0.0/dbhome_3_$(hostname -s).tar.gz dbhome_3
 ```
 
 ```bash
-tar -tzf /u02/backup_vulnerabilidades/dbhome_3_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+tar -tzf /u02/app/oracle/product/19.0.0.0/dbhome_3_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
 ```
 
 ### 1.2 Copia en nodo2
 
 ```bash
-cd /u02/app/oracle/product/19.0.0.0 && tar -czpf /u02/backup_vulnerabilidades/dbhome_3_$(hostname -s).tar.gz dbhome_3
+cd /u02/app/oracle/product/19.0.0.0 && tar -czpf /u02/app/oracle/product/19.0.0.0/dbhome_3_$(hostname -s).tar.gz dbhome_3
 ```
 
 ```bash
-tar -tzf /u02/backup_vulnerabilidades/dbhome_3_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+tar -tzf /u02/app/oracle/product/19.0.0.0/dbhome_3_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
 ```
 
 > ⚠ No sigas al paso 1.3 sin ver **"BACKUP OK"** en los dos nodos.
@@ -138,11 +144,11 @@ Debe devolver `No such file or directory`.
 ### 2.1 nodo1
 
 ```bash
-cd /u01/app/19.0.0.0/grid && tar -czpf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz OPatch.ORG
+cd /u01/app/19.0.0.0/grid && tar -czpf /u02/app/oracle/product/19.0.0.0/grid_OPatch.ORG_$(hostname -s).tar.gz OPatch.ORG
 ```
 
 ```bash
-tar -tzf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+tar -tzf /u02/app/oracle/product/19.0.0.0/grid_OPatch.ORG_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
 ```
 
 ```bash
@@ -152,11 +158,11 @@ rm -rf /u01/app/19.0.0.0/grid/OPatch.ORG
 ### 2.2 nodo2
 
 ```bash
-cd /u01/app/19.0.0.0/grid && tar -czpf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz OPatch.ORG
+cd /u01/app/19.0.0.0/grid && tar -czpf /u02/app/oracle/product/19.0.0.0/grid_OPatch.ORG_$(hostname -s).tar.gz OPatch.ORG
 ```
 
 ```bash
-tar -tzf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+tar -tzf /u02/app/oracle/product/19.0.0.0/grid_OPatch.ORG_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
 ```
 
 ```bash
@@ -189,11 +195,11 @@ du -sh /acfs01/app_acfs/exapatch/OraHome100
 ### 3.2 Copia y borrado
 
 ```bash
-cd /acfs01/app_acfs/exapatch && tar -czpf /u02/backup_vulnerabilidades/exapatch_OraHome100.tar.gz OraHome100
+cd /acfs01/app_acfs/exapatch && tar -czpf /u02/app/oracle/product/19.0.0.0/exapatch_OraHome100.tar.gz OraHome100
 ```
 
 ```bash
-tar -tzf /u02/backup_vulnerabilidades/exapatch_OraHome100.tar.gz > /dev/null && echo "BACKUP OK"
+tar -tzf /u02/app/oracle/product/19.0.0.0/exapatch_OraHome100.tar.gz > /dev/null && echo "BACKUP OK"
 ```
 
 ```bash
@@ -225,11 +231,11 @@ ls -la /opt/oracle.ahf/common/cvu/
 > ⚠ Si **no** está el `cvupack_*.zip` nuevo, no sigas: súbelo antes (como en el runbook de parcheo, Fase 0).
 
 ```bash
-cd /opt/oracle.ahf/common && tar -czpf /u02/backup_vulnerabilidades/ahf_cvu_$(hostname -s).tar.gz cvu
+cd /opt/oracle.ahf/common && tar -czpf /u02/app/oracle/product/19.0.0.0/ahf_cvu_$(hostname -s).tar.gz cvu
 ```
 
 ```bash
-tar -tzf /u02/backup_vulnerabilidades/ahf_cvu_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+tar -tzf /u02/app/oracle/product/19.0.0.0/ahf_cvu_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
 ```
 
 ```bash
@@ -249,11 +255,11 @@ ls -la /opt/oracle.ahf/common/cvu/
 ```
 
 ```bash
-cd /opt/oracle.ahf/common && tar -czpf /u02/backup_vulnerabilidades/ahf_cvu_$(hostname -s).tar.gz cvu
+cd /opt/oracle.ahf/common && tar -czpf /u02/app/oracle/product/19.0.0.0/ahf_cvu_$(hostname -s).tar.gz cvu
 ```
 
 ```bash
-tar -tzf /u02/backup_vulnerabilidades/ahf_cvu_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+tar -tzf /u02/app/oracle/product/19.0.0.0/ahf_cvu_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
 ```
 
 ```bash
@@ -334,7 +340,7 @@ ps -ef | grep -i ords | grep -v grep
 **Directorios borrados con `rm` (OPatch.ORG, exapatch, cvu).** Se restauran descomprimiendo en su directorio padre. Por ejemplo, para OPatch.ORG en nodo1:
 
 ```bash
-tar -xzpf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz -C /u01/app/19.0.0.0/grid
+tar -xzpf /u02/app/oracle/product/19.0.0.0/grid_OPatch.ORG_$(hostname -s).tar.gz -C /u01/app/19.0.0.0/grid
 ```
 
 **dbhome_3.** `dbaascli dbhome delete` también quita el home del inventario y de la metadata de dbaascli. Descomprimir la copia recupera los ficheros, pero el home no vuelve a quedar registrado. Si alguna vez se necesitara de nuevo un home 19.26, lo correcto es crearlo con `dbaascli dbhome create --version 19.26.0.0.0`. La copia `tar` sirve como respaldo de ficheros y configuración.
@@ -343,5 +349,5 @@ tar -xzpf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz -C 
 
 ## Después de la intervención
 
-- Los ficheros `/u02/backup_vulnerabilidades/*.tar.gz` contienen los binarios vulnerables, comprimidos. Algunos escáneres inspeccionan también el interior de los ficheros comprimidos. Conviene sacar estas copias del servidor, o borrarlas pasado el periodo de retención que se acuerde, para que no vuelvan a aparecer en el escaneo.
+- Los ficheros `/u02/app/oracle/product/19.0.0.0/*.tar.gz` contienen los binarios vulnerables, comprimidos. Algunos escáneres inspeccionan también el interior de los ficheros comprimidos. Conviene sacar estas copias del servidor, o borrarlas pasado el periodo de retención que se acuerde, para que no vuelvan a aparecer en el escaneo.
 - Pedir un re-escaneo de vulnerabilidades para cerrar el cambio.
