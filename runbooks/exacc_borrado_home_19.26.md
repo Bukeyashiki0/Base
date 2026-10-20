@@ -1,203 +1,347 @@
-# ExaCC Consumer HQ: zip y borrado del home viejo 19.26 (dbhome_3)
+# Remediación de vulnerabilidades — Copia y borrado de homes y restos antiguos
 
-Se ha parcheado de 19.26 a 19.31. El home viejo ya no se usa y se va a zipear
-a la altura de `19.0.0.0` y después borrar.
+**Contexto:** después de los parcheos previos de GI y RDBMS, y una vez comprobado que el home nuevo funciona bien, se comprimen y eliminan los homes y restos antiguos que ha marcado el escáner de vulnerabilidades. La intervención es **sin afectación y online**: no se para ninguna BBDD ni el clúster.
 
-| Home | Nombre (dbaascli) | Versión | Estado |
-|---|---|---|---|
-| `/u02/app/oracle/product/19.0.0.0/dbhome_2` | OraHome1 | 19.31 | **Nuevo, en uso** |
-| `/u02/app/oracle/product/19.0.0.0/dbhome_3` | OraHome3 | 19.26 | **Viejo, a borrar** |
+| Marcador | Nodo |
+|---|---|
+| `nodo1` | Primer nodo del clúster (sustituir por el hostname real) |
+| `nodo2` | Segundo nodo del clúster (sustituir por el hostname real) |
 
-Orden: **Norte 1** (standby) → Norte 2 (standby) → Sur 1 → Sur 2 (primary).
-
-> **Ojo:** `dbaascli dbhome purge` actúa sobre **todos los nodos del cluster**
-> (Norte 1 y Norte 2 a la vez). Haz el zip (paso 2) en **Norte 1 y Norte 2**
-> antes de lanzar el purge (paso 3).
-
-```bash
-OLD_HOME=/u02/app/oracle/product/19.0.0.0/dbhome_3
-NEW_HOME=/u02/app/oracle/product/19.0.0.0/dbhome_2
-```
+Todos los comandos se lanzan como **root**, salvo los que indican otro usuario. Los pasos largos (los `tar` de homes completos) conviene lanzarlos dentro de `screen -S remediacion`. Si se corta la sesión, se recupera con `screen -r remediacion`.
 
 ---
 
-## 1. Comprobaciones: nadie usa dbhome_3
+## Resumen de lo que marca el escáner y qué se hace con cada ruta
 
-### 1.1 dbaascli (como root)
+| Ruta marcada | Qué es | Acción |
+|---|---|---|
+| `/u02/app/oracle/product/19.0.0.0/dbhome_3/...` (OPatch/jre, jdk, jdk/jre) | Home viejo **OraHome3 (19.26)**, sin BBDD | Copia en ambos nodos y borrado con `dbaascli dbhome delete` |
+| `/u01/app/19.0.0.0/grid/OPatch.ORG/jre` | Copia antigua de OPatch del grid | Copia y `rm` en ambos nodos |
+| `/acfs01/app_acfs/exapatch/OraHome100/...` | Restos de un parche antiguo en el área de staging | Copia y `rm` una sola vez (ACFS es compartido) |
+| `/opt/oracle.ahf/common/cvu/jdk...` | CVU antiguo que descomprimió exachk | Copia y `rm` en ambos nodos, conservando el `cvupack_*.zip` nuevo |
+| `/u01/app/19.0.0.0/grid/OPatch/jre`, `/grid/jdk`, `/grid/tomcat` | Grid **activo** | **No se borra.** Se comprueba la versión (Fase 6) |
+| `/acfs01/ords/jdk-17.0.9` | JDK de ORDS | **No se borra** sin confirmar si ORDS está en uso (Fase 6) |
+
+---
+
+## Fase 0 — Comprobaciones previas
+
+### 0.1 Ninguna BBDD usa dbhome_3
+
+Como **oracle**, en nodo1:
+
+```bash
+for db in $(srvctl config database); do echo "== $db"; srvctl config database -d $db | grep -i "oracle home"; done
+```
+
+Todas las BBDD deben apuntar a `/u02/app/oracle/product/19.0.0.0/dbhome_2`.
+
+> ⚠ **Si alguna BBDD apunta a dbhome_3, PARA AQUÍ.** Ese home no se puede borrar hasta mover la BBDD.
+
+### 0.2 Homes registrados
+
+Como root, en nodo1:
 
 ```bash
 dbaascli system getDBHomes
-dbaascli dbhome getDetails --homeName OraHome3
 ```
-OK si `OraHome3` **no tiene bases de datos** asociadas
-(`databases` vacío o sin entradas).
 
-### 1.2 oratab
+Comprueba dos cosas:
+
+- `OraHome3` → `/u02/app/oracle/product/19.0.0.0/dbhome_3`, versión 19.26. Es el home que se borra.
+- `OraHome1` → `/u02/app/oracle/product/19.0.0.0/dbhome_2`, versión 19.31. Es el home en uso.
+
+Revisa la salida completa y confirma que **no aparece ningún home llamado `OraHome100`**. Si aparece, no se toca la Fase 4.
+
+### 0.3 Espacio para las copias
+
+En nodo1:
 
 ```bash
-grep -v '^#' /etc/oratab | grep dbhome_3
+df -h /u02
+du -sh /u02/app/oracle/product/19.0.0.0/dbhome_3
 ```
-OK si no devuelve nada. Todas las BBDD deben apuntar a `dbhome_2`.
 
-### 1.3 srvctl (como oracle, con entorno de dbhome_2)
+En nodo2:
 
 ```bash
-export ORACLE_HOME=$NEW_HOME
-for db in $(srvctl config database); do
-  echo "== $db"; srvctl config database -d $db | grep -i "oracle home"
+df -h /u02
+du -sh /u02/app/oracle/product/19.0.0.0/dbhome_3
+```
+
+El espacio libre en `/u02` debe ser holgadamente mayor que el tamaño del home. Comprimido ocupa menos, pero es mejor tener margen.
+
+### 0.4 Crear el directorio de copias
+
+En nodo1 y en nodo2:
+
+```bash
+mkdir -p /u02/backup_vulnerabilidades
+```
+
+---
+
+## Fase 1 — dbhome_3 (OraHome3, 19.26)
+
+### 1.1 Copia en nodo1
+
+```bash
+cd /u02/app/oracle/product/19.0.0.0 && tar -czpf /u02/backup_vulnerabilidades/dbhome_3_$(hostname -s).tar.gz dbhome_3
+```
+
+```bash
+tar -tzf /u02/backup_vulnerabilidades/dbhome_3_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+```
+
+### 1.2 Copia en nodo2
+
+```bash
+cd /u02/app/oracle/product/19.0.0.0 && tar -czpf /u02/backup_vulnerabilidades/dbhome_3_$(hostname -s).tar.gz dbhome_3
+```
+
+```bash
+tar -tzf /u02/backup_vulnerabilidades/dbhome_3_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+```
+
+> ⚠ No sigas al paso 1.3 sin ver **"BACKUP OK"** en los dos nodos.
+
+### 1.3 Borrado del home (una sola vez, desde nodo1)
+
+```bash
+dbaascli dbhome delete --oracleHomeName OraHome3
+```
+
+Este comando borra el home **en ambos nodos** y lo quita del inventario de Oracle y de la metadata de dbaascli. Por eso se usa en lugar de `rm -rf`.
+
+### 1.4 Verificación
+
+En nodo1:
+
+```bash
+dbaascli system getDBHomes
+```
+
+`OraHome3` ya no debe aparecer.
+
+En nodo1 y en nodo2:
+
+```bash
+ls -ld /u02/app/oracle/product/19.0.0.0/dbhome_3
+```
+
+Debe devolver `No such file or directory`.
+
+---
+
+## Fase 2 — OPatch.ORG del grid (ambos nodos)
+
+### 2.1 nodo1
+
+```bash
+cd /u01/app/19.0.0.0/grid && tar -czpf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz OPatch.ORG
+```
+
+```bash
+tar -tzf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+```
+
+```bash
+rm -rf /u01/app/19.0.0.0/grid/OPatch.ORG
+```
+
+### 2.2 nodo2
+
+```bash
+cd /u01/app/19.0.0.0/grid && tar -czpf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz OPatch.ORG
+```
+
+```bash
+tar -tzf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+```
+
+```bash
+rm -rf /u01/app/19.0.0.0/grid/OPatch.ORG
+```
+
+> ⚠ Borra **solo** `OPatch.ORG`. `OPatch` (sin `.ORG`) es el que usa el grid y **no se toca**. Revisa bien el comando antes de pulsar Enter.
+
+### 2.3 Verificación (ambos nodos)
+
+```bash
+ls -ld /u01/app/19.0.0.0/grid/OPatch /u01/app/19.0.0.0/grid/OPatch.ORG
+```
+
+Debe existir `OPatch` y no debe existir `OPatch.ORG`.
+
+---
+
+## Fase 3 — Staging antiguo en ACFS: exapatch/OraHome100 (una sola vez, desde nodo1)
+
+`/acfs01` es compartido entre los dos nodos, así que esta fase se hace **solo en nodo1**.
+
+### 3.1 Revisar el contenido
+
+```bash
+ls -la /acfs01/app_acfs/exapatch/
+du -sh /acfs01/app_acfs/exapatch/OraHome100
+```
+
+### 3.2 Copia y borrado
+
+```bash
+cd /acfs01/app_acfs/exapatch && tar -czpf /u02/backup_vulnerabilidades/exapatch_OraHome100.tar.gz OraHome100
+```
+
+```bash
+tar -tzf /u02/backup_vulnerabilidades/exapatch_OraHome100.tar.gz > /dev/null && echo "BACKUP OK"
+```
+
+```bash
+rm -rf /acfs01/app_acfs/exapatch/OraHome100
+```
+
+### 3.3 Verificación (desde nodo2, para confirmar que se ve en el ACFS compartido)
+
+```bash
+ls -ld /acfs01/app_acfs/exapatch/OraHome100
+```
+
+Debe devolver `No such file or directory`.
+
+---
+
+## Fase 4 — CVU antiguo descomprimido (ambos nodos)
+
+Se borra lo que exachk descomprimió del CVU antiguo y se conserva **solo** el `cvupack_*.zip` nuevo. La próxima vez que se ejecute, exachk volverá a descomprimirlo con el JDK actualizado.
+
+### 4.1 nodo1
+
+Revisa el contenido y confirma que está el `cvupack_*.zip` nuevo:
+
+```bash
+ls -la /opt/oracle.ahf/common/cvu/
+```
+
+> ⚠ Si **no** está el `cvupack_*.zip` nuevo, no sigas: súbelo antes (como en el runbook de parcheo, Fase 0).
+
+```bash
+cd /opt/oracle.ahf/common && tar -czpf /u02/backup_vulnerabilidades/ahf_cvu_$(hostname -s).tar.gz cvu
+```
+
+```bash
+tar -tzf /u02/backup_vulnerabilidades/ahf_cvu_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+```
+
+```bash
+find /opt/oracle.ahf/common/cvu -mindepth 1 -maxdepth 1 ! -name 'cvupack*.zip' -exec rm -rf {} +
+```
+
+```bash
+ls -la /opt/oracle.ahf/common/cvu/
+```
+
+Solo debe quedar el `cvupack_*.zip`.
+
+### 4.2 nodo2
+
+```bash
+ls -la /opt/oracle.ahf/common/cvu/
+```
+
+```bash
+cd /opt/oracle.ahf/common && tar -czpf /u02/backup_vulnerabilidades/ahf_cvu_$(hostname -s).tar.gz cvu
+```
+
+```bash
+tar -tzf /u02/backup_vulnerabilidades/ahf_cvu_$(hostname -s).tar.gz > /dev/null && echo "BACKUP OK"
+```
+
+```bash
+find /opt/oracle.ahf/common/cvu -mindepth 1 -maxdepth 1 ! -name 'cvupack*.zip' -exec rm -rf {} +
+```
+
+```bash
+ls -la /opt/oracle.ahf/common/cvu/
+```
+
+---
+
+## Fase 5 — Verificación final de las rutas eliminadas
+
+En nodo1 y en nodo2:
+
+```bash
+for p in \
+  /acfs01/app_acfs/exapatch/OraHome100 \
+  /opt/oracle.ahf/common/cvu/jdk \
+  /u01/app/19.0.0.0/grid/OPatch.ORG \
+  /u02/app/oracle/product/19.0.0.0/dbhome_3 ; do
+  if [ -e "$p" ]; then echo "SIGUE EXISTIENDO: $p"; else echo "eliminado:        $p"; fi
 done
 ```
-OK si todas muestran `dbhome_2`.
 
-### 1.4 Procesos (como root)
+Todas las rutas deben salir como `eliminado`.
 
-```bash
-ps -eo pid,user,args | grep dbhome_3 | grep -v grep
-ls -l /proc/[0-9]*/exe 2>/dev/null | grep dbhome_3
-```
-OK si ambos no devuelven nada (ni pmon, ni listener, ni agentes).
-
-### 1.5 Referencias sueltas
+Comprueba también que la BBDD sigue sana, como **oracle**:
 
 ```bash
-crontab -l -u oracle 2>/dev/null | grep dbhome_3
-grep -l dbhome_3 /home/oracle/.bash_profile /home/oracle/*.env 2>/dev/null
-```
-Si sale algo, corregirlo a `dbhome_2` antes de seguir.
-
-### 1.6 Inventario
-
-```bash
-INV=$(grep inventory_loc /etc/oraInst.loc | cut -d= -f2)
-grep dbhome_3 $INV/ContentsXML/inventory.xml
-```
-Anotar la línea (nombre del home en el inventario). Debe estar sin `REMOVED="T"`.
-
-**Si algún check falla: PARAR.**
-
----
-
-## 2. Backup: zip a la altura de 19.0.0.0 (como root, en cada nodo)
-
-Como root para poder leer también los ficheros de root dentro del home.
-
-### 2.1 Espacio
-
-```bash
-du -sh $OLD_HOME
-df -h /u02
-```
-Hace falta en `/u02` al menos ~la mitad del tamaño del home libre.
-Si no hay espacio, NO seguir (o dejar el zip en otro FS con espacio).
-
-### 2.2 Zip
-
-```bash
-cd /u02/app/oracle/product/19.0.0.0
-nohup zip -r -y -q dbhome_3_19.26.zip dbhome_3 > /tmp/zip_dbhome_3.log 2>&1 &
-```
-`-y` guarda los enlaces simbólicos como enlaces.
-
-Seguimiento:
-```bash
-jobs; ls -lh /u02/app/oracle/product/19.0.0.0/dbhome_3_19.26.zip
-```
-
-### 2.3 Verificar el zip
-
-```bash
-cd /u02/app/oracle/product/19.0.0.0
-zip -T dbhome_3_19.26.zip
-unzip -l dbhome_3_19.26.zip | tail -1
-find dbhome_3 | wc -l
-cat /tmp/zip_dbhome_3.log
-```
-OK si: `test of dbhome_3_19.26.zip OK`, el nº de ficheros del zip
-coincide (o casi) con el `find`, y el log no muestra errores.
-
-**Repetir el paso 2 en Norte 2** antes de ir al paso 3.
-
----
-
-## 3. Desregistrar y borrar el home (como root, en Norte 1)
-
-En ExaCC la forma correcta es con `dbaascli`: desregistra el home del
-inventario, limpia los metadatos de las cloud tools y borra el directorio.
-
-### 3.1 Ver la sintaxis de la versión instalada
-
-```bash
-dbaascli dbhome purge --help
-```
-
-### 3.2 Purge
-
-```bash
-dbaascli dbhome purge --homeName OraHome3
-```
-(Alternativa: `--homePath /u02/app/oracle/product/19.0.0.0/dbhome_3`)
-
-Si el purge se niega porque hay BBDD asociadas: PARAR y volver al paso 1.
-
-> Si el home aparece como *Database Home* en la consola OCI, borrarlo desde
-> la consola (o comprobar que desaparece después del purge) para que el
-> control plane no quede desincronizado.
-
----
-
-## 4. Verificación final
-
-```bash
-dbaascli system getDBHomes            # ya no aparece OraHome3
-ls -ld $OLD_HOME                      # No such file or directory
-grep dbhome_3 $INV/ContentsXML/inventory.xml   # nada, o REMOVED="T"
-ls -lh /u02/app/oracle/product/19.0.0.0/dbhome_3_19.26.zip   # el zip sigue
-df -h /u02
-```
-Y comprobar que las BBDD siguen OK:
-```bash
-ps -ef | grep pmon | grep -v grep
-srvctl status database -d <DB>
+for db in $(srvctl config database); do srvctl status database -d $db; done
 ```
 
 ---
 
-## 5. Plan B: borrado manual (solo si el purge falla)
+## Fase 6 — Rutas que NO se borran: comprobar versión
 
-Solo si `dbaascli dbhome purge` no funciona y con el zip ya verificado.
+Estas rutas pertenecen a software en uso. Borrarlas rompería el grid o ORDS. Se comprueba su versión actual para documentar si el parcheo a 19.31 ya las resolvió.
+
+### 6.1 Grid: JDK, JRE de OPatch y Tomcat (ambos nodos)
 
 ```bash
-# como oracle: detach del inventario
-$OLD_HOME/oui/bin/runInstaller -silent -detachHome ORACLE_HOME=$OLD_HOME
-
-# comprobar
-grep dbhome_3 $INV/ContentsXML/inventory.xml     # REMOVED="T" o nada
-
-# como root: borrar el directorio (revisar la ruta antes de pulsar Enter)
-rm -rf /u02/app/oracle/product/19.0.0.0/dbhome_3
+/u01/app/19.0.0.0/grid/jdk/bin/java -version
 ```
-Después: `dbaascli system getDBHomes`. Si OraHome3 sigue apareciendo en
-los metadatos, abrir SR o limpiarlo desde la consola OCI.
+
+```bash
+/u01/app/19.0.0.0/grid/OPatch/jre/bin/java -version
+```
+
+```bash
+unzip -p /u01/app/19.0.0.0/grid/tomcat/lib/catalina.jar META-INF/MANIFEST.MF | grep Implementation-Version
+```
+
+- Si las versiones son posteriores a las del escáner, el hallazgo ya está resuelto. Basta con pedir un re-escaneo.
+- Si son las mismas, se remedian **parcheando**, nunca borrando:
+  - **OPatch:** última versión, parche MOS 6880880.
+  - **JDK del grid:** JDK Bundle Patch para Grid Infrastructure 19c.
+  - **Tomcat:** se actualiza con la RU de GI.
+
+### 6.2 ORDS
+
+```bash
+ps -ef | grep -i ords | grep -v grep
+```
+
+```bash
+/acfs01/ords/jdk-17.0.9/bin/java -version
+```
+
+- **Si ORDS está en uso:** hay que actualizar su JDK. No se borra.
+- **Si no se usa:** se puede comprimir y borrar `/acfs01/ords` completo, con el mismo patrón de `tar` y `rm` de la Fase 3, una vez confirmado con los responsables de la aplicación.
 
 ---
 
-## 6. Resto de nodos
+## Marcha atrás
 
-1. **Norte 2**: el purge del paso 3 ya lo borra; solo verificar (paso 4).
-2. **Sur 1 / Sur 2** (primary): repetir pasos 1 → 4 (zip en Sur 1 y Sur 2,
-   después purge desde Sur 1).
+**Directorios borrados con `rm` (OPatch.ORG, exapatch, cvu).** Se restauran descomprimiendo en su directorio padre. Por ejemplo, para OPatch.ORG en nodo1:
+
+```bash
+tar -xzpf /u02/backup_vulnerabilidades/grid_OPatch.ORG_$(hostname -s).tar.gz -C /u01/app/19.0.0.0/grid
+```
+
+**dbhome_3.** `dbaascli dbhome delete` también quita el home del inventario y de la metadata de dbaascli. Descomprimir la copia recupera los ficheros, pero el home no vuelve a quedar registrado. Si alguna vez se necesitara de nuevo un home 19.26, lo correcto es crearlo con `dbaascli dbhome create --version 19.26.0.0.0`. La copia `tar` sirve como respaldo de ficheros y configuración.
 
 ---
 
-## Vuelta atrás
+## Después de la intervención
 
-Restaurar desde el zip (como root):
-```bash
-cd /u02/app/oracle/product/19.0.0.0
-unzip -q dbhome_3_19.26.zip
-chown -R oracle:oinstall dbhome_3
-dbhome_3/root.sh                       # recoloca permisos de root
-# como oracle: volver a registrar en inventario
-dbhome_3/oui/bin/runInstaller -silent -attachHome ORACLE_HOME=$OLD_HOME ORACLE_HOME_NAME=OraHome3
-```
-(El zip no guarda propietarios; por eso `chown` + `root.sh`.)
+- Los ficheros `/u02/backup_vulnerabilidades/*.tar.gz` contienen los binarios vulnerables, comprimidos. Algunos escáneres inspeccionan también el interior de los ficheros comprimidos. Conviene sacar estas copias del servidor, o borrarlas pasado el periodo de retención que se acuerde, para que no vuelvan a aparecer en el escaneo.
+- Pedir un re-escaneo de vulnerabilidades para cerrar el cambio.
