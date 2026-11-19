@@ -1,0 +1,5 @@
+directory=KK
+dumpfile=RTSK8142623_%U.dmp
+schemas=TAXONOMIES
+include=VIEW:"IN ('SFCS_UOP_VIEW_SFICS','SFCS_ALL_UOP_VIEW','SFCS_CLASSIF_VIEW_SFICS2','SFCS_CLASSIF_VIEW3')"
+sqlfile=restore_views.sql
